@@ -1,83 +1,143 @@
-import matplotlib.pyplot as plt
 import numpy as np
-import time
+import matplotlib.pyplot as plt
+
 import torch
 from torch import nn
-from torch import tensor
 from torch import optim
-import torch.nn.functional as funct
+import torch.nn.functional as F
 from torch.autograd import Variable
-from torchvision import datasets, transforms
-import torchvision.models as models
+from torchvision import datasets, transforms, models
+from torchvision.datasets import ImageFolder
+from collections import OrderedDict
+from PIL import Image
+
+import time
 import argparse
 
-import utils
+from utils import save_checkpoint, load_checkpoint
 
-ap = argparse.ArgumentParser(description='Train.py')
-# Command Line ardguments
+def parse_args():
+    parser = argparse.ArgumentParser(description="Training process")
+    parser.add_argument('--data_dir', action='store')
+    parser.add_argument('--arch', dest='arch', default='vgg19', choices=['vgg13', 'vgg19'])
+    parser.add_argument('--learning_rate', dest='learning_rate', default='0.01')
+    parser.add_argument('--hidden_units', dest='hidden_units', default='512')
+    parser.add_argument('--epochs', dest='epochs', default='1')
+    parser.add_argument('--gpu', action="store_true", default=True)
+    return parser.parse_args()
 
-ap.add_argument('data_dir', nargs='*', action="store", default="./flowers/")
-ap.add_argument('--gpu', dest="gpu", action="store", default="gpu")
-ap.add_argument('--save_dir', dest="save_dir", action="store", default="./mycheckpoint.pth")
-ap.add_argument('--learning_rate', dest="learning_rate", action="store", default=0.001)
-ap.add_argument('--dropout', dest = "dropout", action = "store", default = 0.5)
-ap.add_argument('--epochs', dest="epochs", action="store", type=int, default=1)
-ap.add_argument('--arch', dest="arch", action="store", default="vgg16", type = str)
-ap.add_argument('--hidden_units', type=int, dest="hidden_units", action="store", default=120)
+def train(model, criterion, optimizer, dataloaders, epochs, gpu):
+    cuda = torch.cuda.is_available()
+    if gpu and cuda:
+        model.cuda()
+    else:
+        model.cpu()
+    running_loss = 0
+    accuracy = 0
+    start = time.time()
 
-pa = ap.parse_args()
-where = pa.data_dir
-path = pa.save_dir
-lr = pa.learning_rate
-structure = pa.arch
-dropout = pa.dropout
-hidden_layer1 = pa.hidden_units
-power = pa.gpu
-epochs = pa.epochs
+    for e in range(epochs):
+        train_mode = 0
+        valid_mode = 1
+        for mode in [train_mode, valid_mode]:   
+            if mode == train_mode:
+                model.train()
+            else:
+                model.eval()
+            pass_count = 0
+            for data in dataloaders[mode]:
+                pass_count += 1
+                inputs, labels = data
+                if gpu and cuda:
+                    inputs, labels = Variable(inputs.cuda()), Variable(labels.cuda())
+                else:
+                    inputs, labels = Variable(inputs), Variable(labels)
+                optimizer.zero_grad()
+                # Forward
+                output = model.forward(inputs)
+                loss = criterion(output, labels)
+                # Backward
+                if mode == train_mode:
+                    loss.backward()
+                    optimizer.step()
+                    
+                running_loss += loss.item()
+                ps = torch.exp(output).data
+                equality = (labels.data == ps.max(1)[1])
+                accuracy = equality.type_as(torch.cuda.FloatTensor()).mean()
+            if mode == train_mode:
+                print("\nEpoch: {}/{} ".format(e+1, epochs),
+                      "\nTraining Loss: {:.4f}  ".format(running_loss/pass_count))
+            else:
+                print("Validation Loss: {:.4f}  ".format(running_loss/pass_count),
+                  "Accuracy: {:.4f}".format(accuracy))
+            running_loss = 0
 
+def main():
+    print('***************Training Started*********************')
+    args = parse_args()
+    
+    data_dir = 'flowers'
+    train_dir = data_dir + '/train'
+    valid_dir = data_dir + '/valid'
+    test_dir = data_dir + '/test'
 
-
-data_dir = "flowers"
-train_dir = data_dir + '/train'
-valid_dir = data_dir + '/valid'
-test_dir = data_dir + '/test'
-
-  
-
-train_transforms = transforms.Compose([transforms.RandomRotation(50),
-                                           transforms.RandomResizedCrop(224),
-                                           transforms.RandomHorizontalFlip(),
-                                           transforms.ToTensor(),
-                                           transforms.Normalize([0.485, 0.456, 0.406],
-                                                                [0.229, 0.224, 0.225])])
-
-
-test_transforms = transforms.Compose([transforms.Resize(256),
-                                          transforms.CenterCrop(224),
-                                          transforms.ToTensor(),
-                                          transforms.Normalize([0.485, 0.456, 0.406],
-                                                               [0.229, 0.224, 0.225])])
-
-validation_transforms = transforms.Compose([transforms.Resize(256),
-                                                transforms.CenterCrop(224),
+    training_transforms = transforms.Compose([transforms.RandomResizedCrop(224),
+                                                transforms.RandomRotation(30),
+                                                transforms.RandomHorizontalFlip(),
                                                 transforms.ToTensor(),
-                                                transforms.Normalize([0.485, 0.456, 0.406],
+                                                transforms.Normalize([0.485, 0.456, 0.406], 
                                                                      [0.229, 0.224, 0.225])])
+    validataion_transforms = transforms.Compose([transforms.Resize(256),
+                                                 transforms.CenterCrop(224),
+                                                 transforms.ToTensor(),
+                                                 transforms.Normalize([0.485, 0.456, 0.406], 
+                                                                      [0.229, 0.224, 0.225])])
+    testing_transforms = transforms.Compose([transforms.Resize(256),
+                                             transforms.CenterCrop(224),
+                                             transforms.ToTensor(),
+                                             transforms.Normalize([0.485, 0.456, 0.406], 
+                                                                  [0.229, 0.224, 0.225])]) 
+    image_datasets = [ImageFolder(train_dir, transform=training_transforms),
+                      ImageFolder(valid_dir, transform=validataion_transforms),
+                      ImageFolder(test_dir, transform=testing_transforms)]
+    
+    dataloaders = [torch.utils.data.DataLoader(image_datasets[0], batch_size=64, shuffle=True),
+                   torch.utils.data.DataLoader(image_datasets[1], batch_size=64),
+                   torch.utils.data.DataLoader(image_datasets[2], batch_size=64)]
+   
+    model = getattr(models, args.arch)(pretrained=True)
+        
+    for param in model.parameters():
+        param.requires_grad = False
+    
+    if args.arch == "vgg13":
+        feature_num = model.classifier[0].in_features
+        classifier = nn.Sequential(OrderedDict([
+                                  ('fc1', nn.Linear(feature_num, 1024)),
+                                  ('drop', nn.Dropout(p=0.5)),
+                                  ('relu', nn.ReLU()),
+                                  ('fc2', nn.Linear(1024, 102)),
+                                  ('output', nn.LogSoftmax(dim=1))]))
+    elif args.arch == "vgg19":
+        feature_num = model.classifier[0].in_features
+        classifier = nn.Sequential(OrderedDict([
+                                  ('fc1', nn.Linear(feature_num, 1024)),
+                                  ('drop', nn.Dropout(p=0.5)),
+                                  ('relu', nn.ReLU()),
+                                  ('fc2', nn.Linear(1024, 102)),
+                                  ('output', nn.LogSoftmax(dim=1))]))
 
-train_data = datasets.ImageFolder(train_dir, transform=train_transforms)
-validation_data = datasets.ImageFolder(valid_dir, transform=validation_transforms)
-test_data = datasets.ImageFolder(test_dir ,transform = test_transforms)
-trainloader = torch.utils.data.DataLoader(train_data, batch_size=64, shuffle=True)
-vloader = torch.utils.data.DataLoader(validation_data, batch_size =32,shuffle = True)
-testloader = torch.utils.data.DataLoader(test_data, batch_size = 20, shuffle = True)
+    model.classifier = classifier
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.classifier.parameters(), lr=float(args.learning_rate))
+    epochs = int(args.epochs)
+    class_index = image_datasets[0].class_to_idx
+    gpu = args.gpu
+    train(model, criterion, optimizer, dataloaders, epochs, gpu)
+    model.class_to_idx = class_index
+    save_checkpoint(model, optimizer, args, classifier)
+    print('***************Training Done*********************')
 
-model, optimizer, criterion = utils.nn_setup(structure,dropout,hidden_layer1,lr)
-
-
-utils.train_network(model, optimizer, criterion, trainloader ,epochs, 20)
-
-
-utils.save_checkpoint(path,structure,hidden_layer1,dropout,lr)
-
-
-print("The Model is trained") 
+if __name__ == "__main__":
+    main()
