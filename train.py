@@ -22,7 +22,7 @@ def parse_args():
     parser.add_argument('--arch', dest='arch', default='vgg19', choices=['vgg13', 'vgg19'])
     parser.add_argument('--learning_rate', dest='learning_rate', default='0.01')
     parser.add_argument('--hidden_units', dest='hidden_units', default='512')
-    parser.add_argument('--epochs', dest='epochs', default='1')
+    parser.add_argument('--epochs', dest='epochs', default='8')
     parser.add_argument('--gpu', action="store_true", default=True)
     return parser.parse_args()
 
