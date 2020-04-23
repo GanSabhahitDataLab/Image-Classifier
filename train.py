@@ -19,15 +19,27 @@ from utils import save_checkpoint, load_checkpoint
 def parse_args():
     parser = argparse.ArgumentParser(description="Training process")
     parser.add_argument('--data_dir', action='store')
-    parser.add_argument('--arch', dest='arch', default='vgg19', choices=['vgg13', 'vgg19'])
+    parser.add_argument('--arch', dest='arch', default='vgg19', choices=['vgg13', 'vgg19','resnet101','densnet121'])
     parser.add_argument('--learning_rate', dest='learning_rate', default='0.01')
-    parser.add_argument('--hidden_units', dest='hidden_units', default='512')
-    parser.add_argument('--epochs', dest='epochs', default='8')
+    parser.add_argument('--hidden_units', dest='hidden_units', default=512)
+    parser.add_argument('--epochs', dest='epochs', default='1')
     parser.add_argument('--gpu', action="store_true", default=True)
     return parser.parse_args()
 
+def gpu_check():
+    print("PyTorch version is {}".format(torch.__version__))
+    gpu_check = torch.cuda.is_available()
+
+    if gpu_check:
+        print("GPU Device available.")
+    else:
+        warnings.warn('No GPU found. Please use a GPU to train your neural network.')
+    return gpu_check
+
+
 def train(model, criterion, optimizer, dataloaders, epochs, gpu):
     cuda = torch.cuda.is_available()
+    gpu_check()
     if gpu and cuda:
         model.cuda()
     else:
@@ -105,26 +117,51 @@ def main():
     dataloaders = [torch.utils.data.DataLoader(image_datasets[0], batch_size=64, shuffle=True),
                    torch.utils.data.DataLoader(image_datasets[1], batch_size=64),
                    torch.utils.data.DataLoader(image_datasets[2], batch_size=64)]
-   
-    model = getattr(models, args.arch)(pretrained=True)
-        
+
+    structures = {"vgg16":64,
+                  "vgg19":64,
+                  "densenet121" : 64,
+                  "alexnet" : 64
+                 }
+ 
+    model = getattr(models, args.arch)(pretrained=True)    
+    
     for param in model.parameters():
         param.requires_grad = False
     
-    if args.arch == "vgg13":
+    if args.arch == "vgg16":
         feature_num = model.classifier[0].in_features
         classifier = nn.Sequential(OrderedDict([
                                   ('fc1', nn.Linear(feature_num, 1024)),
                                   ('drop', nn.Dropout(p=0.5)),
                                   ('relu', nn.ReLU()),
                                   ('fc2', nn.Linear(1024, 102)),
+                                  ('inputs', nn.Linear("vgg16", args.hidden_units)),
                                   ('output', nn.LogSoftmax(dim=1))]))
     elif args.arch == "vgg19":
         feature_num = model.classifier[0].in_features
         classifier = nn.Sequential(OrderedDict([
                                   ('fc1', nn.Linear(feature_num, 1024)),
                                   ('drop', nn.Dropout(p=0.5)),
+                                  ('relu', nn.ReLU()),                                 
+                                  ('fc2', nn.Linear(1024, 102)),
+                                  ('output', nn.LogSoftmax(dim=1))]))
+    elif args.arch == "densenet121":
+        feature_num = model.classifier[0].in_features
+        classifier = nn.Sequential(OrderedDict([
+                                  ('fc1', nn.Linear(feature_num, 1024)),
+                                  ('drop', nn.Dropout(p=0.5)),
                                   ('relu', nn.ReLU()),
+                                  ('inputs', nn.Linear("densenet121", args.hidden_units)),
+                                  ('fc2', nn.Linear(1024, 102)),
+                                  ('output', nn.LogSoftmax(dim=1))]))
+    elif args.arch == "resnet101":
+        feature_num = model.classifier[0].in_features
+        classifier = nn.Sequential(OrderedDict([
+                                  ('fc1', nn.Linear(feature_num, 1024)),
+                                  ('drop', nn.Dropout(p=0.5)),
+                                  ('relu', nn.ReLU()),
+                                  ('inputs', nn.Linear("resnet101", args.hidden_units)),
                                   ('fc2', nn.Linear(1024, 102)),
                                   ('output', nn.LogSoftmax(dim=1))]))
 

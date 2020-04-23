@@ -18,6 +18,7 @@ def save_checkpoint(model, optimizer, args, classifier):
                   'class_to_idx': model.class_to_idx}
 
     torch.save(checkpoint, 'checkpoint.pth')
+
     
     
 def load_checkpoint(filepath):
